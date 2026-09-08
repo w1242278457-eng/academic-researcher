@@ -1,0 +1,9 @@
+PaperPilot is a derivative work based on GPT Researcher.
+
+Upstream project: GPT Researcher
+Copyright 2023 Assaf Elovic and contributors
+Repository: https://github.com/assafelovic/gpt-researcher
+License: Apache License 2.0
+
+This repository adds an academic-paper research workflow, an academic
+configuration and prompt adaptation layer, and project-specific UI changes.
