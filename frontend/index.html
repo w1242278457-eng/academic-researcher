@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 
 <head>
-    <title>GPT 研究员 - AI 智能研究助手</title>
-    <meta name="description" content="基于 DeepSeek/GPT 的智能研究助手">
+    <title>PaperPilot 学术论文调研工作台</title>
+    <meta name="description" content="面向学术论文检索、综述、方法比较与研究空白发现的智能调研工作台">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="./static/favicon.ico">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -133,18 +133,13 @@
         </div>
     </div>
 
-    <section class="landing">
-        <div class="max-w-5xl mx-auto text-center">
-            <h1 class="text-4xl font-extrabold mx-auto lg:text-7xl">
-                告别 <br>
-                <span
-                    style="background-image:linear-gradient(to right, #9867F0, #ED4E50); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">漫长的手动研究</span>
-            </h1>
-            <p class="max-w-6xl mx-auto text-gray-600 mt-8" style="font-size:20px">
-                欢迎使用 <b>GPT 研究员</b>，您的 AI 研究助手，快速获取洞察和全面研究。<br>
-                GPT 研究员会自动完成从准确收集来源、组织研究结果到生成带引用的自定义报告的所有工作。
-            </p>
-            <a href="#form" class="btn btn-primary">开始研究</a>
+    <section class="landing" aria-labelledby="workspace-title">
+        <div class="landing-inner">
+            <div class="brand-mark"><span class="brand-mark-dot"></span> PAPERPILOT <span class="brand-mark-divider"></span> ACADEMIC RESEARCH</div>
+            <h1 id="workspace-title">学术论文调研工作台</h1>
+            <p>从研究问题出发，检索可追溯的论文证据，快速形成结构化综述。</p>
+            <div class="landing-meta"><span><i class="fas fa-book-open"></i> 文献综述</span><span><i class="fas fa-table-columns"></i> 方法比较</span><span><i class="fas fa-compass"></i> 研究空白</span></div>
+            <a href="#form" class="btn btn-primary landing-cta"><i class="fas fa-arrow-down"></i> 创建调研任务</a>
         </div>
     </section>
 
@@ -157,10 +152,10 @@
                 <input type="radio" name="agent" id="autoAgent" value="Auto Agent" checked hidden>
             </div>
             <fieldset class="academic-config-panel">
-                <legend>Academic research workspace</legend>
+                <legend><i class="fas fa-sliders"></i> 学术调研设置</legend>
                 <div class="form-row">
                     <div class="form-group col-md-6">
-                        <label for="academicDomain">Research domain</label>
+                        <label for="academicDomain">研究领域</label>
                         <select id="academicDomain" class="form-control">
                             <option value="computer_science">Computer Science</option>
                             <option value="artificial_intelligence">Artificial Intelligence</option>
@@ -171,7 +166,7 @@
                         </select>
                     </div>
                     <div class="form-group col-md-6">
-                        <label for="academicResearchType">Research task</label>
+                        <label for="academicResearchType">调研类型</label>
                         <select id="academicResearchType" class="form-control">
                             <option value="literature_review">Literature review</option>
                             <option value="state_of_art">State of the art</option>
@@ -184,7 +179,7 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group col-md-4">
-                        <label for="evidenceStandard">Evidence standard</label>
+                        <label for="evidenceStandard">证据优先级</label>
                         <select id="evidenceStandard" class="form-control">
                             <option value="peer_reviewed">Peer-reviewed first</option>
                             <option value="highly_cited">Highly cited first</option>
@@ -194,11 +189,11 @@
                         </select>
                     </div>
                     <div class="form-group col-md-4">
-                        <label for="publicationYearFrom">Published since</label>
+                        <label for="publicationYearFrom">起始年份</label>
                         <input id="publicationYearFrom" type="number" min="1900" max="2100" class="form-control" placeholder="Optional">
                     </div>
                     <div class="form-group col-md-4">
-                        <label for="citationStyle">Citation style</label>
+                        <label for="citationStyle">引用格式</label>
                         <select id="citationStyle" class="form-control">
                             <option value="APA 7">APA 7</option>
                             <option value="IEEE">IEEE</option>
