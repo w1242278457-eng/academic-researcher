@@ -1,6 +1,6 @@
 {
   "query": "Is AI in a hype cycle?",
-  "max_sections": 3,
+  "max_sections": 2,
   "max_plan_revisions": 3,
   "publish_formats": {
     "markdown": true,
@@ -8,12 +8,15 @@
     "docx": true
   },
   "include_human_feedback": false,
-  "follow_guidelines": false,
-  "model": "gpt-4o",
+  "follow_guidelines": true,
+  "model": "deepseek-chat",
   "guidelines": [
-    "The report MUST be written in APA format",
-    "Each sub section MUST include supporting sources using hyperlinks. If none exist, erase the sub section or rewrite it to be a part of the previous section",
-    "The report MUST be written in spanish"
+    "请使用中文撰写报告，保留必要的英文术语。",
+    "重要结论应对应实际取得的来源；证据不足时明确说明，不编造论文、引用或实验结果。",
+    "区分来源明确陈述、基于原理的推断和证据缺口；允许在证据有限时给出有边界的结论。"
   ],
-  "verbose": true
+  "verbose": true,
+  "section_concurrency": 2,
+  "max_section_revisions": 2,
+  "max_fact_checks": 3
 }

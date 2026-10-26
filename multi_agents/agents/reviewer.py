@@ -56,9 +56,9 @@ Guidelines: {guidelines}\nDraft: {draft_state.get("draft")}\n
                     f"Review feedback is: {response}...", agent="REVIEWER"
                 )
 
-        if "None" in response:
+        if isinstance(response, str) and response.strip() == "None":
             return None
-        return response
+        return response if isinstance(response, str) and response.strip() else "Invalid chapter review; manual review required"
 
     async def run(self, draft_state: dict):
         task = draft_state.get("task")

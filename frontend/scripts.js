@@ -8,6 +8,13 @@ const GPTResearcher = (() => {
   let currentReport = ''; // Store the current report (will be overwritten)
   let isFirstReport = true; // Flag to track if this is the first report
   let chatContainer = null; // Global reference to chat container
+  let chatReport = '';
+  let chatReportPath = '';
+  let chatHistory = [];
+  let chatPending = false;
+  let chatEventsBound = false;
+  let pendingChatMessage = null;
+  let reconnectTimer = null;
   let lastRequestData = null; // Store the last request data for reconnection
 
   // Add WebSocket monitoring variables
@@ -67,6 +74,7 @@ const GPTResearcher = (() => {
     // No need to set display property here
 
     updateState('initial');
+    restoreReportForChat();
 
     // Initialize research icon to not spinning
     updateResearchIcon(false);
@@ -784,6 +792,13 @@ const GPTResearcher = (() => {
     // Reset report variables
     allReports = '';
     currentReport = '';
+    chatReport = '';
+    chatReportPath = '';
+    chatHistory = [];
+    chatPending = false;
+    pendingChatMessage = null;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
     isFirstReport = true;
 
     // Hide the download bar
@@ -817,10 +832,10 @@ const GPTResearcher = (() => {
         });
     }
 
-    dispose_socket = listenToSockEvents() // Assign the new dispose function
+    dispose_socket = listenToSockEvents(true) // Only explicit research submission sends start
   }
 
-  const listenToSockEvents = () => {
+  const listenToSockEvents = (startResearchOnOpen = false) => {
     const { protocol, host, pathname } = window.location
     const ws_uri = `${protocol === 'https:' ? 'wss:' : 'ws:'
       }//${host}${pathname}ws`
@@ -829,6 +844,7 @@ const GPTResearcher = (() => {
     connectionTimeout = setTimeout(() => {
       updateResearchIcon(false);
       console.log("WebSocket connection timed out");
+      if (socket && socket.readyState === WebSocket.CONNECTING) socket.close();
     }, 10000); // 10 seconds timeout
 
     // Configure Showdown converter to properly handle code blocks
@@ -852,10 +868,13 @@ const GPTResearcher = (() => {
     updateWebSocketStatus();
 
     socket = new WebSocket(ws_uri)
+    const thisSocket = socket;
     let reportContent = ''; // Store the report content for history
     let downloadLinkData = null; // Store download links
 
     socket.onmessage = (event) => {
+      if (socket !== thisSocket) return;
+      if (event.data === 'pong') return;
       // Reset reconnect attempts on successful message
       reconnectAttempts = 0;
 
@@ -867,6 +886,14 @@ const GPTResearcher = (() => {
       lastActivityTime = Date.now();
       updateWebSocketStatus();
 
+      if (data.type === 'error' || (data.type === 'logs' && data.content === 'error')) {
+        addAgentResponse({output: data.output || '研究任务失败，请查看终端中的错误详情。'});
+        isResearchActive = false;
+        updateResearchIcon(false);
+        updateState('error');
+        return;
+      }
+
       if (data.type === 'logs') {
         if (data.content === 'subqueries' && data.metadata && Array.isArray(data.metadata)) {
           displaySubQuestions(data.metadata)
@@ -876,8 +903,15 @@ const GPTResearcher = (() => {
         console.log("Received images:", data);  // Debug log
         displaySelectedImages(data)
       } else if (data.type === 'report') {
+        if (data.content === 'multi_agent_final') {
+          reportContent = data.output;
+          chatReport = reportContent;
+          writeReport({output:data.output}, converter, true, false);
+          return;
+        }
         // Add to reportContent for history
         reportContent += data.output;
+        chatReport = reportContent;
 
         // Get the current report_type
         const report_type = document.querySelector('select[name="report_type"]').value;
@@ -897,6 +931,10 @@ const GPTResearcher = (() => {
       } else if (data.type === 'path') {
         updateState('finished')
         downloadLinkData = updateDownloadLink(data)
+        chatReportPath = downloadLinkData?.md || '';
+        if (chatReport) {
+          try { sessionStorage.setItem('paperpilotChatReport', JSON.stringify({report:chatReport, path:chatReportPath, links:downloadLinkData, prompt:document.getElementById('task').value})); } catch (error) { console.warn('Report cache unavailable', error); }
+        }
         isResearchActive = false;
 
         // Get the current report_type
@@ -922,6 +960,8 @@ const GPTResearcher = (() => {
         // Update WebSocket status
         updateWebSocketStatus();
       } else if (data.type === 'chat') {
+        setChatPending(false);
+        if (data.content) chatHistory.push({role:'assistant', content:data.content});
         // Handle chat messages from the AI
         // Remove loading indicator and add AI's response
         const loadingElements = document.querySelectorAll('.chat-loading');
@@ -937,6 +977,7 @@ const GPTResearcher = (() => {
     }
 
     socket.onopen = (event) => {
+      if (socket !== thisSocket) return;
       // Clear the connection timeout
       clearTimeout(connectionTimeout);
 
@@ -948,14 +989,16 @@ const GPTResearcher = (() => {
       // Reset reconnect attempts on successful connection
       reconnectAttempts = 0;
 
-      // Ensure the research icon is spinning when connection is established
-      updateResearchIcon(true);
-
-      // If this is a reconnection and we're in research mode, don't send a new start command
-      if (isResearchActive && lastRequestData) {
-        console.log("Reconnected during active research, not sending new start command");
+      // Opening a chat/recovery connection must never resubmit research.
+      if (!startResearchOnOpen) {
+        if (pendingChatMessage) {
+          const queued = pendingChatMessage;
+          pendingChatMessage = null;
+          socket.send(queued);
+        }
         return;
       }
+      updateResearchIcon(true);
 
       const task = document.getElementById('task').value
       const report_type = document.querySelector(
@@ -1015,15 +1058,24 @@ const GPTResearcher = (() => {
     }
 
     socket.onclose = (event) => {
+      if (socket !== thisSocket) return;
+      clearTimeout(connectionTimeout);
       // Update metrics and status when connection closes
       connectionStartTime = null;
       updateWebSocketStatus();
 
       console.log("WebSocket connection closed", event);
 
-      // If research is active, try to automatically reconnect
+      if (chatPending && !pendingChatMessage) {
+        // It may have reached the provider already. Do not silently replay a sent chat.
+        setChatPending(false);
+        document.querySelectorAll('.chat-loading').forEach(element => element.remove());
+        addChatMessage('连接已断开，尚未收到回答。请重新发送问题。', false);
+      }
+      if (pendingChatMessage) reconnectWebSocket();
       if (isResearchActive) {
-        reconnectWebSocket();
+        updateState('error');
+        showToast('研究连接已断开，任务状态未确认；不会自动重新运行研究。', 6000);
       }
     }
 
@@ -1036,8 +1088,8 @@ const GPTResearcher = (() => {
     return () => {
       try {
         isResearchActive = false; // Mark research as inactive
-        if (socket && socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
-          socket.close();
+        if (thisSocket.readyState !== WebSocket.CLOSED && thisSocket.readyState !== WebSocket.CLOSING) {
+          thisSocket.close();
         }
 
         // Update metrics on socket disposal
@@ -1747,7 +1799,9 @@ const GPTResearcher = (() => {
       chatMessages.innerHTML = '';
     }
 
-    // Add event listeners for chat input
+    // Bind once even when multiple reports complete on the same page.
+    if (!chatEventsBound) {
+    chatEventsBound = true;
     chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -1768,6 +1822,9 @@ const GPTResearcher = (() => {
       chatInput.style.height = (chatInput.scrollHeight) + 'px';
     });
 
+    }
+    chatHistory = [];
+    setChatPending(false);
     // Add welcome message
     addChatMessage('我可以回答关于研究报告的问题。您想了解什么？', false);
   }
@@ -1861,98 +1918,85 @@ const GPTResearcher = (() => {
     });
   };
 
-  // Create a new function to handle WebSocket reconnection
+  const setChatPending = (pending) => {
+    chatPending = pending;
+    const button = document.getElementById('sendChatBtn');
+    if (button) button.disabled = pending;
+  };
+
+  const restoreReportForChat = async () => {
+    try {
+      let cached = null;
+      try { cached = JSON.parse(sessionStorage.getItem('paperpilotChatReport') || 'null'); } catch (_) {}
+      const requested = new URLSearchParams(window.location.search).get('report');
+      if (requested && /^[A-Za-z0-9_-]+$/.test(requested)) {
+        const reportPath = '/outputs/' + encodeURIComponent(requested) + '.md';
+        const response = await fetch(reportPath);
+        if (!response.ok) throw new Error('Saved report not found');
+        cached = {report:await response.text(), path:reportPath, links:{md:reportPath}, prompt:''};
+      }
+      if (!cached?.report) {
+        const entry = conversationHistory.find(item => item.links?.md);
+        if (!entry) return;
+        const source = new URL(entry.links.md, window.location.origin + '/');
+        if (source.origin !== window.location.origin || !source.pathname.startsWith('/outputs/') || !source.pathname.endsWith('.md')) return;
+        const response = await fetch(source.href);
+        if (!response.ok) return;
+        cached = {report:await response.text(), links:entry.links, prompt:entry.prompt};
+      }
+      if (!cached.report?.trim() || isResearchActive || chatReport) return;
+      chatReport = cached.report;
+      chatReportPath = cached.path || cached.links?.md || '';
+      document.getElementById('task').value = cached.prompt || '';
+      const converter = new showdown.Converter({tables:true, ghCodeBlocks:true});
+      writeReport({output:chatReport}, converter, true, false);
+      if (cached.links) updateDownloadLink({output:cached.links});
+      updateState('finished');
+      showToast('已恢复上次报告，可以继续提问，无需重新研究。');
+    } catch (error) { console.warn('Could not restore report for chat', error); }
+  };
+
   const reconnectWebSocket = (message = null) => {
-    // Don't attempt too many reconnections
+    if (message) pendingChatMessage = message;
+    if (reconnectTimer !== null) return true;
     if (reconnectAttempts >= maxReconnectAttempts) {
-      console.error(`Failed to reconnect after ${maxReconnectAttempts} attempts`);
-      addChatMessage(`尝试 ${maxReconnectAttempts} 次后无法重新连接。请刷新页面。`, false);
+      pendingChatMessage = null;
+      setChatPending(false);
+      document.querySelectorAll('.chat-loading').forEach(element => element.remove());
+      addChatMessage('无法恢复连接，请确认服务已启动后重试。', false);
       return false;
     }
-
     reconnectAttempts++;
-
-    // Calculate backoff time (exponential backoff)
     const backoff = reconnectInterval * Math.pow(1.5, reconnectAttempts - 1);
-    console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts}) in ${backoff}ms...`);
-
-    // Show reconnection status to user
-    addChatMessage(`连接丢失。正在尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`, false);
-
-    // Try to reconnect after delay
-    setTimeout(() => {
-      try {
-        // Setup new WebSocket connection
-        dispose_socket = listenToSockEvents();
-
-        // Set up a one-time handler to send the message after reconnection
-        if (message) {
-          const messageToSend = message;
-          const checkConnectionAndSend = () => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              console.log("Reconnected successfully, sending queued message");
-              socket.send(messageToSend);
-              return true;
-            } else if (reconnectAttempts < maxReconnectAttempts) {
-              console.log("Socket not ready yet, retrying...");
-              setTimeout(checkConnectionAndSend, 1000);
-              return false;
-            }
-            return false;
-          };
-
-          setTimeout(checkConnectionAndSend, 1000);
-        }
-
-        return true;
-      } catch (e) {
-        console.error("Error during reconnection:", e);
-        return false;
-      }
+    addChatMessage(`正在恢复聊天连接 (${reconnectAttempts}/${maxReconnectAttempts})…`, false);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      try { dispose_socket = listenToSockEvents(false); }
+      catch (error) { reconnectWebSocket(); }
     }, backoff);
-
     return true;
   };
 
-  // Send a chat message
   const sendChatMessage = () => {
     const chatInput = document.getElementById('chatInput');
-    if (!chatInput || !chatInput.value.trim()) return;
-
+    if (!chatInput || !chatInput.value.trim() || chatPending) return;
+    if (isResearchActive) { showToast('请等待当前研究完成后再讨论报告。'); return; }
+    const report = chatReport || document.getElementById('reportContainer')?.innerText || '';
+    if (!report.trim()) { showToast('请先生成或恢复一份报告再提问。'); return; }
     const message = chatInput.value.trim();
-
-    // Add user message to chat
     addChatMessage(message, true);
-
-    // Clear input
+    chatHistory.push({role:'user', content:message});
     chatInput.value = '';
     chatInput.style.height = 'auto';
-
-    // Add loading indicator
-    const loadingId = addLoadingIndicator();
-
-    // Prepare the message to send
-    const messageToSend = `chat ${JSON.stringify({ message: message })}`;
-
-    // Send message through WebSocket
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(messageToSend);
-    } else {
-      // If socket is closed, try to reconnect
-      removeLoadingIndicator(loadingId);
-
-      // Reset reconnect attempts if this is a new chat session
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        reconnectAttempts = 0;
-      }
-
-      // Attempt to reconnect and queue the message to be sent after reconnection
-      if (!reconnectWebSocket(messageToSend)) {
-        // If reconnection fails or max attempts reached
-        addChatMessage('无法发送消息。连接不可用。', false);
-      }
+    setChatPending(true);
+    addLoadingIndicator();
+    const payload = `chat ${JSON.stringify({message, report, report_path:chatReportPath || undefined, messages:chatHistory.slice(-20)})}`;
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(payload);
+    else {
+      reconnectAttempts = 0;
+      reconnectWebSocket(payload);
     }
-  }
+  };
 
   // Add a chat message to the UI
   const addChatMessage = (message, isUser = false) => {
@@ -1976,7 +2020,7 @@ const GPTResearcher = (() => {
     }
 
     // Set message content
-    messageEl.innerHTML = isUser ? escapeHtml(processedMessage) : processedMessage;
+    messageEl.innerHTML = isUser ? escapeHtml(processedMessage) : sanitizeHtml(processedMessage);
 
     // Add timestamp
     const timestampEl = document.createElement('div');

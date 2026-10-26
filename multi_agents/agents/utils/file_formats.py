@@ -50,16 +50,8 @@ async def write_md_to_pdf(text: str, path: str) -> str:
     file_path = f"{path}/{task}.pdf"
 
     try:
-        # Get the directory of the current file
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        css_path = os.path.join(current_dir, "pdf_styles.css")
-        
-        # Moved imports to inner function to avoid known import errors with gobject-2.0
-        from md2pdf.core import md2pdf
-        md2pdf(file_path,
-               md_content=text,
-               css_file_path=css_path,
-               base_url=None)
+        from backend.pdf_export import write_markdown_pdf
+        await write_markdown_pdf(text, file_path, base_url=os.path.abspath("."))
         print(f"Report written to {file_path}")
     except Exception as e:
         print(f"Error in converting Markdown to PDF: {e}")

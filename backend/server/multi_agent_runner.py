@@ -2,6 +2,9 @@ import os
 import sys
 from typing import Any, Awaitable, Callable
 
+from .task_capacity import TaskCapacity
+
+_capacity = TaskCapacity(int(os.getenv("RESEARCH_MAX_CONCURRENT", "5")))
 RunResearchTask = Callable[..., Awaitable[Any]]
 
 
@@ -30,4 +33,4 @@ def _resolve_run_research_task() -> RunResearchTask:
 
 async def run_multi_agent_task(*args, **kwargs) -> Any:
     run_research_task = _resolve_run_research_task()
-    return await run_research_task(*args, **kwargs)
+    return await _capacity.run(lambda: run_research_task(*args, **kwargs))

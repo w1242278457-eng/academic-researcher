@@ -44,16 +44,19 @@ class FactCheckerAgent:
 
         review = await self.check_facts(research_state)
 
-        if "None" in review:
+        if isinstance(review, str) and review.strip() == "None":
             review = None
             if self.websocket and self.stream_output:
                 await self.stream_output("logs", "fact_checking", "Draft accepted by Fact Checker.", self.websocket)
             else:
                 print_agent_output("Draft accepted by Fact Checker.", agent="FACT_CHECKER")
         else:
+            if not isinstance(review, str) or not review.strip():
+                review = "Empty or invalid fact-check response; manual review required"
             if self.websocket and self.stream_output:
                 await self.stream_output("logs", "fact_checking", f"Fact Checker found issues: {review}...", self.websocket)
             else:
                 print_agent_output(f"Fact Checker found issues: {review}...", agent="FACT_CHECKER")
 
-        return {"fact_check_notes": review}
+        return {"fact_check_notes": review if review is None or review else "Empty fact-check response; manual review required",
+                "fact_check_count": research_state.get("fact_check_count", 0) + 1}

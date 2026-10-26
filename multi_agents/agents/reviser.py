@@ -69,6 +69,7 @@ You MUST return nothing but a JSON in the following format:
                 )
 
         return {
+            "revision_count": draft_state.get("revision_count", 0) + 1,
             "draft": revision.get("draft"),
             "revision_notes": revision.get("revision_notes"),
         }
