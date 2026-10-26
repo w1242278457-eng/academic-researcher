@@ -17,6 +17,7 @@ import logging
 import hashlib
 
 from .multi_agent_runner import run_multi_agent_task
+from .report_context import resolve_report_context
 from backend.academic import AcademicResearchConfig
 
 # Import chat agent
@@ -175,6 +176,7 @@ async def handle_start_command(websocket, data: str, manager):
         academic_config,
     )
     report = str(report)
+    websocket.scope["paperpilot_report_context"] = {"report": report, "report_id": sanitized_filename}
     file_paths = await generate_report_files(report, sanitized_filename)
     # Add JSON log path to file_paths
     file_paths["json"] = os.path.relpath(logs_handler.log_file)
@@ -195,7 +197,17 @@ async def handle_chat_command(websocket, data: str):
         chat_data = json.loads(json_str)
         
         message = chat_data.get("message", "")
-        report = chat_data.get("report", "")
+        try:
+            report, report_context = resolve_report_context(
+                chat_data, Path(__file__).resolve().parents[2],
+                websocket.scope.get("paperpilot_report_context"),
+            )
+        except ValueError as exc:
+            await websocket.send_json({"type": "chat", "role": "assistant", "content": str(exc),
+                                       "error": "missing_report_context"})
+            return
+        logger.info("Report chat context: source=%s characters=%d sha256=%s",
+                    report_context["source"], report_context["characters"], report_context["sha256"])
         messages = chat_data.get("messages", [])
         
         # If only message is provided, convert to messages format
@@ -235,8 +247,9 @@ async def handle_chat_command(websocket, data: str):
             "content": response_content,
             "role": "assistant",
             "metadata": {
-                "tool_calls": tool_calls_metadata
-            } if tool_calls_metadata else None
+                "tool_calls": tool_calls_metadata or [],
+                "report_context": report_context,
+            }
         })
         
         logger.info(f"Chat response sent successfully")

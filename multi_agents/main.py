@@ -20,7 +20,7 @@ def open_task():
     # Construct the absolute path to task.json
     task_json_path = os.path.join(current_dir, 'task.json')
     
-    with open(task_json_path, 'r') as f:
+    with open(task_json_path, 'r', encoding='utf-8') as f:
         task = json.load(f)
 
     if not task:

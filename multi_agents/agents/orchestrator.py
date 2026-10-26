@@ -1,11 +1,11 @@
 import os
 import time
+import uuid
 import datetime
 from langgraph.graph import StateGraph, END
 # from langgraph.checkpoint.memory import MemorySaver
 from .utils.views import print_agent_output
 from ..memory.research import ResearchState
-from .utils.utils import sanitize_filename
 from .plan_review import (
     DEFAULT_MAX_PLAN_REVISIONS,
     route_human_feedback,
@@ -36,12 +36,12 @@ class ChiefEditorAgent:
 
     def _generate_task_id(self):
         # Currently time based, but can be any unique identifier
-        return int(time.time())
+        return uuid.uuid4().hex
 
     def _create_output_directory(self):
-        output_dir = "./outputs/" + \
-            sanitize_filename(
-                f"run_{self.task_id}_{self.task.get('query')[0:40]}")
+        # Prompts may contain newlines, Windows-invalid characters or long text.
+        # Keep the output path independent of the prompt; the task retains the query.
+        output_dir = os.path.join(".", "outputs", f"run_{self.task_id}")
 
         os.makedirs(output_dir, exist_ok=True)
         return output_dir
@@ -85,23 +85,24 @@ class ChiefEditorAgent:
         workflow.add_edge('publisher', END)
 
         # Add human in the loop
-        MAX_REVISIONS = 5
         workflow.add_conditional_edges(
-            'human',
-            lambda state: (
-                "accept" if state['human_feedback'] is None
-                else "force_accept" if state.get('revisions_count', 0) >= MAX_REVISIONS
-                else "revise"
-            ),
-            {"accept": "researcher", "force_accept": "researcher", "revise": "planner"}
+            'human', self._route_human_feedback,
+            {"accept": "researcher", "revise": "planner"}
         )
 
         # Add fact checker loop
         workflow.add_conditional_edges(
             'fact_checker',
-            lambda draft: "accept" if draft.get("fact_check_notes") is None else "revise",
+            self._route_fact_check,
             {"accept": "visualizer", "revise": "writer"}
         )
+
+    def _route_fact_check(self, state):
+        if state.get("fact_check_notes") is None:
+            return "accept"
+        if state.get("fact_check_count", 0) >= int(self.task.get("max_fact_checks", 3)):
+            raise RuntimeError("Fact-check limit reached; report remains unverified")
+        return "revise"
 
     def _route_human_feedback(self, review):
         max_plan_revisions = self.task.get(

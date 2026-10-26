@@ -1,10 +1,17 @@
 from dotenv import load_dotenv
 import logging
+import sys
 from pathlib import Path
 
 # Create logs directory if it doesn't exist
 logs_dir = Path("logs")
 logs_dir.mkdir(exist_ok=True)
+
+# Windows terminals commonly default to GBK; keep logs and progress output
+# from failing when a message contains emoji or other Unicode characters.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure logging
 logging.basicConfig(

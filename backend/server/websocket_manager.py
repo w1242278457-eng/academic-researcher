@@ -126,7 +126,11 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
     # mutation needed here (mutating os.environ would persist across requests and
     # affect unrelated sessions, see issue #1676).
     if mcp_enabled and mcp_configs:
-        print(f"🔧 MCP enabled with strategy '{mcp_strategy}' and {len(mcp_configs)} server(s)")
+        logger.info(
+            "MCP enabled with strategy '%s' and %d server(s)",
+            mcp_strategy,
+            len(mcp_configs),
+        )
         await logs_handler.send_json({
             "type": "logs",
             "content": "mcp_init",
@@ -143,6 +147,9 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             headers=headers
         )
         report = report.get("report", "")
+        if not isinstance(report, str) or not report.strip():
+            raise RuntimeError("Multi-agent workflow returned no final report")
+        await logs_handler.send_json({"type": "report", "content": "multi_agent_final", "output": report})
 
     elif report_type == ReportType.DetailedReport.value:
         researcher = DetailedReport(

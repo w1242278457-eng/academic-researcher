@@ -60,19 +60,28 @@ class EditorAgent:
         workflow = self._create_workflow()
         chain = workflow.compile()
 
-        queries = research_state.get("sections")
+        queries = research_state.get("sections") or []
         title = research_state.get("title")
 
         self._log_parallel_research(queries)
 
-        final_drafts = [
-            chain.ainvoke(self._create_task_input(
-                research_state, query, title), config={"tags": ["gpt-researcher"]})
-            for query in queries
-        ]
-        research_results = [
-            result["draft"] for result in await asyncio.gather(*final_drafts)
-        ]
+        task = research_state.get("task") or {}
+        semaphore = asyncio.Semaphore(max(1, min(16, int(task.get("section_concurrency", 3)))))
+
+        async def run_section(query):
+            async with semaphore:
+                return await chain.ainvoke(self._create_task_input(research_state, query, title),
+                    config={"tags": ["gpt-researcher"], "recursion_limit": 32})
+
+        pending = [asyncio.create_task(run_section(query)) for query in queries]
+        try:
+            results = await asyncio.gather(*pending)
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            raise
+        research_results = [result["draft"] for result in results]
 
         return {"research_data": research_results}
 
@@ -137,11 +146,20 @@ class EditorAgent:
         workflow.add_edge("reviser", "reviewer")
         workflow.add_conditional_edges(
             "reviewer",
-            lambda draft: "accept" if draft["review"] is None else "revise",
+            self._route_review,
             {"accept": END, "revise": "reviser"},
         )
 
         return workflow
+
+    @staticmethod
+    def _route_review(draft):
+        if draft.get("review") is None:
+            return "accept"
+        maximum = int((draft.get("task") or {}).get("max_section_revisions", 3))
+        if draft.get("revision_count", 0) >= maximum:
+            raise RuntimeError("Section review limit reached; draft remains unverified")
+        return "revise"
 
     def _log_parallel_research(self, queries: List[str]) -> None:
         """Log the start of parallel research tasks."""
